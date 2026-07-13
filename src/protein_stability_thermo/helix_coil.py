@@ -1,28 +1,23 @@
 """
 helix_coil.py
 
-Helix-coil transition models, matching BPC PS8 problems 8.1-8.4. Four
-models of increasing sophistication are implemented, in the same order
-developed in the coursework:
+Helix-coil transition models. Four models of increasing sophistication are implemented:
 
-1. Non-cooperative / independent-identical-molecules (IIM) model (8.1A,
-   8.2A): every residue is independently helix or coil with the same
+1. Non-cooperative / independent-identical-molecules (IIM) model: every residue is independently helix or coil with the same
    equilibrium constant k. Partition function rho = (1+k)^N.
 
-2. Residue-specific non-cooperative model (8.3): same independence
+2. Residue-specific non-cooperative model: same independence
    assumption, but each residue type has its own k (e.g. k_A for Ala,
    k_E for Glu), so fraction helix is a per-sequence mean-field average.
 
-3. Zipper model (8.1B-8.1I): only a single contiguous helical run is
+3. Zipper model: only a single contiguous helical run is
    allowed. A run of length j has (N-j+1) possible positions along the
    chain, and starting a run carries one nucleation penalty regardless
    of its length.
 
-4. Matrix (Zimm-Bragg-style) model (8.4A-8.4C): the exact statistical
+4. Matrix model: the exact statistical
    count via a 2x2 transfer matrix, allowing any arrangement of helix
-   and coil (not just one contiguous run). Built with sympy exactly as
-   in the coursework, since exact symbolic differentiation is how the
-   ensemble-average fraction helix was obtained.
+   and coil (not just one contiguous run).
 
 All models use k as the per-residue helix/coil equilibrium constant
 (propagation-like parameter) and, where relevant, a second parameter
@@ -43,8 +38,7 @@ import sympy as sym
 
 def partition_noncooperative(N: int, k: float) -> float:
     """
-    Partition function for N independent, identical helix/coil residues
-    (PS8 8.1A): rho = (1 + k)^N.
+    Partition function for N independent, identical helix/coil residues: rho = (1 + k)^N.
     """
     return (1.0 + k) ** N
 
@@ -52,7 +46,7 @@ def partition_noncooperative(N: int, k: float) -> float:
 def population_noncooperative(N: int, k: float, j: int) -> float:
     """
     Probability of exactly j helical residues out of N, under the
-    non-cooperative model (PS8 8.2A): binomial in k.
+    non-cooperative model: binomial in k.
 
         P(j) = C(N, j) * k^j / (1 + k)^N
     """
@@ -64,7 +58,7 @@ def population_noncooperative(N: int, k: float, j: int) -> float:
 def entropy_noncooperative(N: int, k: float) -> float:
     """
     Molar entropy (in units of R, i.e. S/R) of the non-cooperative model
-    as a function of k (PS8 8.2A): peaks at k=1, where coil and helix
+    as a function of k: peaks at k=1, where coil and helix
     states are equally likely and disorder is maximized.
 
         S/R = -N * [p_c*ln(p_c) + p_h*ln(p_h)],  p_c = 1/(1+k), p_h = k/(1+k)
@@ -84,7 +78,7 @@ def fraction_helix_residue_specific(k_values: Sequence[float]) -> float:
     """
     Fraction helix for a sequence of residues each with their own
     independent equilibrium constant k_i, under the non-cooperative
-    model (PS8 8.3): mean-field average, no cooperativity between
+    model: mean-field average, no cooperativity between
     neighbors.
 
         <f_h> = (1/N) * sum_i [ k_i / (1 + k_i) ]
@@ -102,7 +96,7 @@ def sequence_to_k_values(
 ) -> np.ndarray:
     """
     Map a sequence string to per-residue k values using a lookup table,
-    e.g. {'A': k_A, 'E': k_E} as in PS8 8.3 (poly-Ala/Glu block
+    e.g. {'A': k_A, 'E': k_E} (poly-Ala/Glu block
     sequences). Residues not in the table fall back to `default` if
     given, else raise KeyError.
     """
@@ -123,7 +117,7 @@ def sequence_to_k_values(
 
 def partition_zipper(N: int, k: float, sigma: float) -> float:
     """
-    Partition function for the zipper model (PS8 8.1B-8.1E): only a
+    Partition function for the zipper model: only a
     single contiguous run of helical residues is allowed, anywhere
     along the chain. A run of length j has (N-j+1) possible positions
     and carries a single nucleation weight sigma regardless of length.
@@ -141,7 +135,7 @@ def partition_zipper(N: int, k: float, sigma: float) -> float:
 def population_zipper(N: int, k: float, sigma: float, j: int) -> float:
     """
     Probability of a helical run of exactly length j (0 <= j <= N)
-    under the zipper model (PS8 8.1G):
+    under the zipper model:
 
         P(0) = 1 / rho
         P(j) = (N-j+1) * k^j * sigma / rho,   j >= 1
@@ -162,10 +156,10 @@ def mean_helix_content_zipper(N: int, k: float, sigma: float) -> float:
 
 
 # ---------------------------------------------------------------------
-# 4. Matrix (Zimm-Bragg-style) model, exact via sympy
+# 4. Matrix model
 # ---------------------------------------------------------------------
 #
-# Transfer matrix and boundary vectors exactly as used in PS8 8.4A:
+# Transfer matrix and boundary vectors:
 #   W = [[k*t, 1], [k, 1]]
 #   n = [0, 1]              (row vector)
 #   c = [[1], [1]]           (column vector)
@@ -191,7 +185,7 @@ def _rho_symbolic(N: int):
 def partition_matrix(N: int, k: float, t: float) -> float:
     """
     Numeric partition function for the matrix model at given N, k, t,
-    matching PS8 8.4A (rho_N = n W^N c).
+    matching (rho_N = n W^N c).
     """
     rho_expr = _rho_symbolic(N)
     rho_func = sym.lambdify([_k_sym, _t_sym], rho_expr, "numpy")
@@ -200,8 +194,7 @@ def partition_matrix(N: int, k: float, t: float) -> float:
 
 def fraction_helix_matrix(N: int, k, t: float) -> np.ndarray:
     """
-    Ensemble-average fraction helix for the matrix model, matching PS8
-    8.4B exactly:
+    Ensemble-average fraction helix for the matrix model:
 
         <f_h> = (k / (N * rho)) * d(rho)/dk
 
