@@ -16,11 +16,11 @@ from protein_stability_thermo.helix_coil import (
 
 
 # ---------------------------------------------------------------------
-# 1. Non-cooperative (IIM) model - PS8 8.1A, 8.2A
+# 1. Non-cooperative (IIM) model 
 # ---------------------------------------------------------------------
 
-def test_partition_noncooperative_matches_ps8_8_1a():
-    """PS8 8.1A: N=4, rho = (1+k)^4."""
+def test_partition_noncooperative_matches():
+    """N=4, rho = (1+k)^4."""
     assert partition_noncooperative(N=4, k=1.0) == pytest.approx(16.0)
 
 
@@ -30,8 +30,8 @@ def test_population_noncooperative_sums_to_one():
     assert total == pytest.approx(1.0)
 
 
-def test_population_noncooperative_matches_ps8_8_1a_table():
-    """PS8 8.1A table at k=1, rho=16: populations are 1/16, 4/16, 6/16,
+def test_population_noncooperative_matches_table():
+    """table at k=1, rho=16: populations are 1/16, 4/16, 6/16,
     4/16, 1/16 for j=0..4."""
     N, k = 4, 1.0
     expected = [1 / 16, 4 / 16, 6 / 16, 4 / 16, 1 / 16]
@@ -40,7 +40,7 @@ def test_population_noncooperative_matches_ps8_8_1a_table():
 
 
 def test_entropy_noncooperative_peaks_at_k_equals_one():
-    """PS8 8.2A: molar entropy has a maximum at k=1 (~2.079 R = 3 ln2 R)."""
+    """molar entropy has a maximum at k=1 (~2.079 R = 3 ln2 R)."""
     N = 3
     k_vals = np.linspace(0.01, 10, 500)
     entropies = [entropy_noncooperative(N, k) for k in k_vals]
@@ -58,7 +58,7 @@ def test_entropy_noncooperative_zero_at_extremes():
 
 
 # ---------------------------------------------------------------------
-# 2. Residue-specific non-cooperative model - PS8 8.3
+# 2. Residue-specific non-cooperative model 
 # ---------------------------------------------------------------------
 
 def test_fraction_helix_residue_specific_uniform_k():
@@ -85,8 +85,8 @@ def test_sequence_to_k_values_raises_on_unknown_without_default():
         sequence_to_k_values("AX", {"A": 1.0})
 
 
-def test_ps8_8_3_block_sequence_higher_kA_gives_more_helix_with_kE_20():
-    """PS8 8.3B pattern: AAAAAAAEEEEEEAAAAAAA with kE=20 (E strongly
+def test_block_sequence_higher_kA_gives_more_helix_with_kE_20():
+    """AAAAAAAEEEEEEAAAAAAA with kE=20 (E strongly
     helix-favoring) should give higher fraction helix than kE=0 at the
     same kA, since the E block becomes pre-folded."""
     seq = "AAAAAAAEEEEEEAAAAAAA"
@@ -101,18 +101,18 @@ def test_ps8_8_3_block_sequence_higher_kA_gives_more_helix_with_kE_20():
 
 
 # ---------------------------------------------------------------------
-# 3. Zipper model - PS8 8.1B-8.1I
+# 3. Zipper model 
 # ---------------------------------------------------------------------
 
-def test_partition_zipper_matches_ps8_8_1b_formula():
-    """PS8 8.1B, N=4: rho = 1 + 4k*sigma + 3k^2*sigma + 2k^3*sigma + k^4*sigma."""
+def test_partition_zipper_matches_formula():
+    """N=4: rho = 1 + 4k*sigma + 3k^2*sigma + 2k^3*sigma + k^4*sigma."""
     N, k, sigma = 4, 0.5, 1.0
     expected = 1 + 4 * k * sigma + 3 * k**2 * sigma + 2 * k**3 * sigma + k**4 * sigma
     assert partition_zipper(N, k, sigma) == pytest.approx(expected)
 
 
-def test_partition_zipper_matches_ps8_8_1e_numeric_value():
-    """PS8 8.1E: k=0.00164, sigma=5000, N=4 gives rho ~ 33.84."""
+def test_partition_zipper_matches_numeric_value():
+    """k=0.00164, sigma=5000, N=4 gives rho ~ 33.84."""
     rho = partition_zipper(N=4, k=0.00164, sigma=5000)
     assert rho == pytest.approx(33.84, abs=0.01)
 
@@ -123,8 +123,8 @@ def test_population_zipper_sums_to_one():
     assert total == pytest.approx(1.0)
 
 
-def test_population_zipper_matches_ps8_8_1g_table():
-    """PS8 8.1G, zipper model at k=0.00164, sigma=5000, rho=33.84:
+def test_population_zipper_matches_table():
+    """zipper model at k=0.00164, sigma=5000, rho=33.84:
     P(j=1) ~ 32.8/33.84."""
     N, k, sigma = 4, 0.00164, 5000
     p1 = population_zipper(N, k, sigma, j=1)
@@ -137,7 +137,7 @@ def test_zipper_j_out_of_range_raises():
 
 
 # ---------------------------------------------------------------------
-# 4. Matrix (Zimm-Bragg-style) model - PS8 8.4A-8.4C
+# 4. Matrix model 
 # ---------------------------------------------------------------------
 
 def test_partition_matrix_matches_noncooperative_at_t_equals_one():
@@ -149,11 +149,10 @@ def test_partition_matrix_matches_noncooperative_at_t_equals_one():
     assert rho_matrix == pytest.approx(rho_noncoop, rel=1e-6)
 
 
-def test_fraction_helix_matrix_matches_ps8_8_4_pattern():
-    """PS8 8.4B: at N=20, t=1000, low k, fraction helix should show a
+def test_fraction_helix_matrix_matches_pattern():
+    """at N=20, t=1000, low k, fraction helix should show a
     sharp sigmoidal rise (cooperative transition) rather than a smooth
-    gradual increase - matches the sharp jump seen around k~0.0015 in
-    the coursework plot."""
+    gradual increase."""
     N, t = 20, 1000.0
     k_low = 0.0005
     k_high = 0.003
@@ -186,7 +185,7 @@ def test_fraction_helix_matrix_bounded_between_zero_and_one():
 def test_fraction_helix_matrix_increases_with_t_at_fixed_marginal_k():
     """Higher cooperativity t should push a marginally helix-favoring
     chain (k slightly > threshold) toward more helix, matching the
-    qualitative behavior explored across the 8.4C k-t surface."""
+    qualitative behavior explored across the k-t surface."""
     N = 15
     k = 0.8
     fh_low_t = fraction_helix_matrix(N, k, t=1.0)
