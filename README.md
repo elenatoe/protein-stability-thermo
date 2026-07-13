@@ -19,11 +19,11 @@ In development. Core CHC fitting implemented; helix-coil module in progress.
 
 ## Install
 
-\`\`\`bash
+```bash
 git clone https://github.com/elenatoe/protein-stability-thermo.git
 cd protein-stability-thermo
 pip install -r requirements.txt
-\`\`\`
+```
 
 ## License
 
