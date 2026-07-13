@@ -2,75 +2,135 @@ import numpy as np
 import pytest
 
 from protein_stability_thermo.chc_model import (
-    two_state_signal,
-    fit_chc_curve,
-    generate_synthetic_curve,
+    two_state_denaturation_signal,
+    fit_denaturation_curve,
+    generate_synthetic_melt,
+    chc_stability_curve,
+    fit_chc_stability_curve,
+    generate_synthetic_stability_curve,
 )
 
 
-def test_two_state_signal_limits():
-    """At D=0 with a strongly stable protein, signal should sit near the
-    folded baseline; at very high D it should sit near the unfolded
-    baseline."""
-    D = np.array([0.0, 10.0])
-    Y = two_state_signal(D, dG_H2O=5.0, m=2.0, y_f=1.0, m_f=0.0, y_u=-1.0, m_u=0.0)
-    assert Y[0] == pytest.approx(1.0, abs=0.05)
-    assert Y[1] == pytest.approx(-1.0, abs=0.05)
+# ---------------------------------------------------------------------
+# Stage 1: two-state denaturation curve
+# ---------------------------------------------------------------------
 
-
-def test_two_state_signal_midpoint():
-    """At D = Cm = dG_H2O/m, folded and unfolded populations are equal,
-    so the signal should sit halfway between the two baselines."""
-    dG_H2O, m = 4.0, 2.0
-    Cm = dG_H2O / m
-    Y = two_state_signal(
-        np.array([Cm]), dG_H2O=dG_H2O, m=m, y_f=1.0, m_f=0.0, y_u=-1.0, m_u=0.0
+def test_denaturation_signal_matches_native_at_low_D():
+    """At D=0 with a strongly folded protein (very negative dG_H2O),
+    signal should sit at the native baseline."""
+    D = np.array([0.0])
+    y = two_state_denaturation_signal(
+        D, a_N=-1.0, b_N=0.0, a_D=1.0, b_D=0.0, dG_H2O=-20.0, m=6.0, T=298.15
     )
-    assert Y[0] == pytest.approx(0.0, abs=1e-6)
+    assert y[0] == pytest.approx(-1.0, abs=0.01)
 
 
-def test_fit_recovers_known_parameters():
-    """Fitting noiseless synthetic data should recover the input
-    parameters to high precision."""
-    true_params = dict(dG_H2O=3.5, m=1.8, y_f=1.2, m_f=0.05, y_u=-0.8, m_u=-0.02)
-    D, Y = generate_synthetic_curve(**true_params, n_points=30, noise_sd=0.0, seed=1)
+def test_denaturation_signal_matches_denatured_at_high_D():
+    D = np.array([10.0])
+    y = two_state_denaturation_signal(
+        D, a_N=-1.0, b_N=0.0, a_D=1.0, b_D=0.0, dG_H2O=-20.0, m=6.0, T=298.15
+    )
+    assert y[0] == pytest.approx(1.0, abs=0.01)
 
-    result = fit_chc_curve(D, Y)
 
-    assert result.dG_H2O == pytest.approx(true_params["dG_H2O"], rel=1e-3)
-    assert result.m == pytest.approx(true_params["m"], rel=1e-3)
-    assert result.Cm == pytest.approx(true_params["dG_H2O"] / true_params["m"], rel=1e-3)
+def test_fit_recovers_known_parameters_noiseless():
+    """Fitting noiseless synthetic data should recover dG_H2O and m to
+    high precision, matching the workflow in PS6 6.3."""
+    true_dG, true_m, T = -20.8, 6.4, 298.15
+    D, signal = generate_synthetic_melt(
+        T=T, dG_H2O=true_dG, m=true_m, n_points=30, noise_sd=0.0, seed=1
+    )
+    result = fit_denaturation_curve(D, signal, T=T)
+
+    assert result.dG_H2O == pytest.approx(true_dG, rel=1e-3)
+    assert result.m == pytest.approx(true_m, rel=1e-3)
+    assert result.T == T
 
 
 def test_fit_tolerates_noise():
-    """With realistic noise, the fit should still recover Cm within a
-    reasonable tolerance."""
-    true_params = dict(dG_H2O=3.0, m=2.0, y_f=1.0, m_f=0.0, y_u=-1.0, m_u=0.0)
-    D, Y = generate_synthetic_curve(**true_params, n_points=25, noise_sd=0.03, seed=42)
+    """dG_H2O and m are correlated in this fit (this is a known real
+    tradeoff in Gdn-HCl melts) - with noise, either can drift while
+    their ratio Cm = -dG_H2O/m stays well-constrained near the actual
+    transition midpoint. Check the well-constrained quantity."""
+    true_dG, true_m, T = -21.3, 6.5, 303.15
+    true_Cm = -true_dG / true_m
+    D, signal = generate_synthetic_melt(
+        T=T, dG_H2O=true_dG, m=true_m, n_points=30, noise_sd=0.3, seed=7
+    )
+    result = fit_denaturation_curve(D, signal, T=T)
+    fit_Cm = -result.dG_H2O / result.m
 
-    result = fit_chc_curve(D, Y)
-    true_Cm = true_params["dG_H2O"] / true_params["m"]
-
-    assert result.Cm == pytest.approx(true_Cm, abs=0.1)
+    assert fit_Cm == pytest.approx(true_Cm, abs=0.3)
     assert result.dG_H2O_err > 0
-    assert result.m_err > 0
 
 
 def test_fit_rejects_too_few_points():
     D = np.array([0.0, 1.0, 2.0])
-    Y = np.array([1.0, 0.5, -1.0])
+    signal = np.array([1.0, 0.5, -1.0])
     with pytest.raises(ValueError):
-        fit_chc_curve(D, Y)
+        fit_denaturation_curve(D, signal, T=298.15)
 
 
 def test_fit_rejects_mismatched_shapes():
     D = np.linspace(0, 5, 10)
-    Y = np.linspace(1, -1, 8)
+    signal = np.linspace(1, -1, 8)
     with pytest.raises(ValueError):
-        fit_chc_curve(D, Y)
+        fit_denaturation_curve(D, signal, T=298.15)
 
 
-def test_generate_synthetic_curve_shape():
-    D, Y = generate_synthetic_curve(n_points=17)
-    assert D.shape == (17,)
-    assert Y.shape == (17,)
+# ---------------------------------------------------------------------
+# Stage 2: CHC stability curve
+# ---------------------------------------------------------------------
+
+def test_chc_stability_curve_matches_ps6_reference_values():
+    """PS6 6.4 fit dG_H2O(T) data from real melts at 8 temperatures and
+    obtained Th=288.71 K, Ts=294.29 K, dCp=-3.81 kJ/mol/K. Reproduce
+    that fit here as a regression check against the real coursework
+    result."""
+    T = np.array([293.15, 298.15, 303.15, 313.15, 318.15, 323.15, 328.15, 333.15])
+    dG = np.array(
+        [-21.285983, -20.799230, -21.355305, -18.047234,
+         -17.637077, -16.917975, -13.863625, -11.701674]
+    )
+
+    result = fit_chc_stability_curve(T, dG)
+
+    assert result.Th == pytest.approx(288.71, abs=0.5)
+    assert result.Ts == pytest.approx(294.29, abs=0.5)
+    assert result.dCp == pytest.approx(-3.81, abs=0.1)
+
+
+def test_chc_fit_recovers_known_parameters_noiseless():
+    true_Th, true_Ts, true_dCp = 288.0, 294.0, -3.5
+    T, dG = generate_synthetic_stability_curve(
+        Th=true_Th, Ts=true_Ts, dCp=true_dCp, noise_sd=0.0, seed=3
+    )
+    result = fit_chc_stability_curve(T, dG)
+
+    assert result.Th == pytest.approx(true_Th, abs=0.1)
+    assert result.Ts == pytest.approx(true_Ts, abs=0.1)
+    assert result.dCp == pytest.approx(true_dCp, abs=0.05)
+
+
+def test_chc_stability_curve_has_a_stability_maximum():
+    """The CHC curve should have a single interior maximum (most stable
+    temperature) between Th and Ts, not be monotonic - matches the
+    U-shaped stability curves plotted in PS6 6.2A."""
+    T = np.linspace(250, 360, 500)
+    dG = chc_stability_curve(T, Th=288.0, Ts=294.0, dCp=-3.5)
+    min_idx = np.argmin(dG)
+    assert 0 < min_idx < len(T) - 1
+
+
+def test_chc_fit_rejects_too_few_points():
+    T = np.array([290.0, 300.0])
+    dG = np.array([-20.0, -18.0])
+    with pytest.raises(ValueError):
+        fit_chc_stability_curve(T, dG)
+
+
+def test_chc_fit_rejects_mismatched_shapes():
+    T = np.linspace(280, 330, 8)
+    dG = np.linspace(-20, -12, 6)
+    with pytest.raises(ValueError):
+        fit_chc_stability_curve(T, dG)

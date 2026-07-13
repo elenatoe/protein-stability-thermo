@@ -1,152 +1,231 @@
 """
 helix_coil.py
 
-Helix-coil transition prediction using the Zimm-Bragg transfer matrix method.
+Helix-coil transition models, matching BPC PS8 problems 8.1-8.4. Four
+models of increasing sophistication are implemented, in the same order
+developed in the coursework:
 
-Model
------
-Each residue i is in state helix (h) or coil (c). The Zimm-Bragg model
-assigns:
-    - s_i  : propagation parameter for residue i (statistical weight of
-             extending a helix once nucleated). Residue-specific if a
-             per-residue propensity scale is supplied, else uniform.
-    - sigma: nucleation parameter (statistical weight penalty for starting
-             a new helical segment), typically a single small constant
-             (~1e-3 to 1e-4) shared across the chain.
+1. Non-cooperative / independent-identical-molecules (IIM) model (8.1A,
+   8.2A): every residue is independently helix or coil with the same
+   equilibrium constant k. Partition function rho = (1+k)^N.
 
-Transfer matrix per residue (rows = state at i-1, columns = state at i,
-both ordered [coil, helix]):
+2. Residue-specific non-cooperative model (8.3): same independence
+   assumption, but each residue type has its own k (e.g. k_A for Ala,
+   k_E for Glu), so fraction helix is a per-sequence mean-field average.
 
-    W_i = [[1,        sigma*s_i ],
-           [1,        s_i       ]]
+3. Zipper model (8.1B-8.1I): only a single contiguous helical run is
+   allowed. A run of length j has (N-j+1) possible positions along the
+   chain, and starting a run carries one nucleation penalty regardless
+   of its length.
 
-i.e. coil->coil = 1, coil->helix = sigma*s_i (nucleation penalty applied
-once, when a new helical run starts), helix->coil = 1, helix->helix = s_i
-(propagation, no further nucleation penalty). The partition function is
-the product of per-residue matrices between boundary vectors, and
-per-residue helix probability is obtained from the ratio of forward *
-backward partial partition weights to the total, which is the standard
-way to get marginals out of a 1D transfer-matrix model.
+4. Matrix (Zimm-Bragg-style) model (8.4A-8.4C): the exact statistical
+   count via a 2x2 transfer matrix, allowing any arrangement of helix
+   and coil (not just one contiguous run). Built with sympy exactly as
+   in the coursework, since exact symbolic differentiation is how the
+   ensemble-average fraction helix was obtained.
 
-This module supports:
-    - uniform s (single propagation parameter for the whole sequence)
-    - per-residue s from a propensity table (e.g. Pace-Scholtz helix
-      propensity scale), so real sequences can be scored residue-by-residue
+All models use k as the per-residue helix/coil equilibrium constant
+(propagation-like parameter) and, where relevant, a second parameter
+(sigma or t) controlling cooperativity/nucleation.
 """
 
 from typing import Dict, Optional, Sequence
 
+import math
+
 import numpy as np
-
-# Pace & Scholtz (1998) helix propensity scale, delta-delta-G (kcal/mol)
-# relative to Ala (Ala = 0, most helix-favorable). Lower = more
-# helix-favorable. Used here only as an optional convenience table to
-# derive per-residue s values; callers may supply their own.
-PACE_SCHOLTZ_DDG = {
-    "A": 0.00, "L": 0.21, "R": 0.21, "M": 0.24, "K": 0.26,
-    "Q": 0.39, "E": 0.40, "I": 0.41, "W": 0.49, "S": 0.50,
-    "Y": 0.53, "F": 0.54, "H": 0.61, "V": 0.61, "N": 0.65,
-    "T": 0.66, "C": 0.68, "D": 0.69, "G": 1.00, "P": 3.16,
-}
-
-R_GAS = 0.0019872  # kcal / (mol * K)
+import sympy as sym
 
 
-def s_from_ddG(ddG: float, T: float = 298.15) -> float:
-    """Convert a helix-propensity ddG (kcal/mol, relative) to a
-    Boltzmann propagation weight s = exp(-ddG / RT)."""
-    return float(np.exp(-ddG / (R_GAS * T)))
+# ---------------------------------------------------------------------
+# 1. Non-cooperative (independent, identical molecules) model
+# ---------------------------------------------------------------------
+
+def partition_noncooperative(N: int, k: float) -> float:
+    """
+    Partition function for N independent, identical helix/coil residues
+    (PS8 8.1A): rho = (1 + k)^N.
+    """
+    return (1.0 + k) ** N
 
 
-def propensity_scale_to_s(
+def population_noncooperative(N: int, k: float, j: int) -> float:
+    """
+    Probability of exactly j helical residues out of N, under the
+    non-cooperative model (PS8 8.2A): binomial in k.
+
+        P(j) = C(N, j) * k^j / (1 + k)^N
+    """
+    if not (0 <= j <= N):
+        raise ValueError("j must be between 0 and N")
+    return math.comb(N, j) * (k ** j) / partition_noncooperative(N, k)
+
+
+def entropy_noncooperative(N: int, k: float) -> float:
+    """
+    Molar entropy (in units of R, i.e. S/R) of the non-cooperative model
+    as a function of k (PS8 8.2A): peaks at k=1, where coil and helix
+    states are equally likely and disorder is maximized.
+
+        S/R = -N * [p_c*ln(p_c) + p_h*ln(p_h)],  p_c = 1/(1+k), p_h = k/(1+k)
+    """
+    p_c = 1.0 / (1.0 + k)
+    p_h = k / (1.0 + k)
+    s_c = p_c * np.log(p_c) if p_c > 0 else 0.0
+    s_h = p_h * np.log(p_h) if p_h > 0 else 0.0
+    return -N * (s_c + s_h)
+
+
+# ---------------------------------------------------------------------
+# 2. Residue-specific non-cooperative (mean-field) model
+# ---------------------------------------------------------------------
+
+def fraction_helix_residue_specific(k_values: Sequence[float]) -> float:
+    """
+    Fraction helix for a sequence of residues each with their own
+    independent equilibrium constant k_i, under the non-cooperative
+    model (PS8 8.3): mean-field average, no cooperativity between
+    neighbors.
+
+        <f_h> = (1/N) * sum_i [ k_i / (1 + k_i) ]
+    """
+    k_values = np.asarray(k_values, dtype=float)
+    if k_values.size == 0:
+        return 0.0
+    return float(np.mean(k_values / (1.0 + k_values)))
+
+
+def sequence_to_k_values(
     sequence: str,
-    scale: Optional[Dict[str, float]] = None,
-    T: float = 298.15,
+    k_by_residue: Dict[str, float],
+    default: Optional[float] = None,
 ) -> np.ndarray:
     """
-    Convert a sequence to an array of per-residue s values using a
-    ddG propensity scale (default: Pace & Scholtz).
-
-    Unknown residues fall back to Ala's value (ddG = 0, s = 1).
+    Map a sequence string to per-residue k values using a lookup table,
+    e.g. {'A': k_A, 'E': k_E} as in PS8 8.3 (poly-Ala/Glu block
+    sequences). Residues not in the table fall back to `default` if
+    given, else raise KeyError.
     """
-    if scale is None:
-        scale = PACE_SCHOLTZ_DDG
-    return np.array(
-        [s_from_ddG(scale.get(aa.upper(), 0.0), T=T) for aa in sequence],
-        dtype=float,
-    )
+    values = []
+    for aa in sequence.upper():
+        if aa in k_by_residue:
+            values.append(k_by_residue[aa])
+        elif default is not None:
+            values.append(default)
+        else:
+            raise KeyError(f"No k value for residue {aa!r} and no default given")
+    return np.array(values, dtype=float)
 
 
-def helix_probabilities(
-    s: Sequence[float],
-    sigma: float = 5e-4,
-) -> np.ndarray:
+# ---------------------------------------------------------------------
+# 3. Zipper model (single contiguous helical run)
+# ---------------------------------------------------------------------
+
+def partition_zipper(N: int, k: float, sigma: float) -> float:
     """
-    Compute per-residue helix probability via the Zimm-Bragg transfer
-    matrix method.
+    Partition function for the zipper model (PS8 8.1B-8.1E): only a
+    single contiguous run of helical residues is allowed, anywhere
+    along the chain. A run of length j has (N-j+1) possible positions
+    and carries a single nucleation weight sigma regardless of length.
+
+        rho = 1 + sum_{j=1}^{N} (N-j+1) * k^j * sigma
+
+    (the "1" is the all-coil state, j=0).
+    """
+    total = 1.0
+    for j in range(1, N + 1):
+        total += (N - j + 1) * (k ** j) * sigma
+    return total
+
+
+def population_zipper(N: int, k: float, sigma: float, j: int) -> float:
+    """
+    Probability of a helical run of exactly length j (0 <= j <= N)
+    under the zipper model (PS8 8.1G):
+
+        P(0) = 1 / rho
+        P(j) = (N-j+1) * k^j * sigma / rho,   j >= 1
+    """
+    if not (0 <= j <= N):
+        raise ValueError("j must be between 0 and N")
+    rho = partition_zipper(N, k, sigma)
+    if j == 0:
+        return 1.0 / rho
+    return (N - j + 1) * (k ** j) * sigma / rho
+
+
+def mean_helix_content_zipper(N: int, k: float, sigma: float) -> float:
+    """Average fraction of helical residues under the zipper model,
+    computed directly from the j-population distribution."""
+    weighted = sum(j * population_zipper(N, k, sigma, j) for j in range(0, N + 1))
+    return weighted / N
+
+
+# ---------------------------------------------------------------------
+# 4. Matrix (Zimm-Bragg-style) model, exact via sympy
+# ---------------------------------------------------------------------
+#
+# Transfer matrix and boundary vectors exactly as used in PS8 8.4A:
+#   W = [[k*t, 1], [k, 1]]
+#   n = [0, 1]              (row vector)
+#   c = [[1], [1]]           (column vector)
+#   rho_N = (n * W**N * c)[0]
+#
+# k is the propagation-like equilibrium constant, t is the
+# cooperativity parameter (t=1 recovers the non-cooperative model,
+# since the matrix product's growth is then governed by k alone in the
+# same way as (1+k)^N).
+
+_k_sym, _t_sym = sym.symbols("k t", positive=True)
+
+
+def _rho_symbolic(N: int):
+    """Build the symbolic partition function rho_N(k, t) via the exact
+    transfer-matrix product used in the coursework."""
+    W = sym.Matrix([[_k_sym * _t_sym, 1], [_k_sym, 1]])
+    n = sym.Matrix([[0, 1]])
+    c = sym.Matrix([[1], [1]])
+    return (n * W**N * c)[0]
+
+
+def partition_matrix(N: int, k: float, t: float) -> float:
+    """
+    Numeric partition function for the matrix model at given N, k, t,
+    matching PS8 8.4A (rho_N = n W^N c).
+    """
+    rho_expr = _rho_symbolic(N)
+    rho_func = sym.lambdify([_k_sym, _t_sym], rho_expr, "numpy")
+    return float(rho_func(k, t))
+
+
+def fraction_helix_matrix(N: int, k, t: float) -> np.ndarray:
+    """
+    Ensemble-average fraction helix for the matrix model, matching PS8
+    8.4B exactly:
+
+        <f_h> = (k / (N * rho)) * d(rho)/dk
 
     Parameters
     ----------
-    s : array-like of float, length N
-        Per-residue propagation parameters. Use a constant array for a
-        uniform-propensity chain, or propensity_scale_to_s() output for
-        a real sequence.
-    sigma : float
-        Nucleation parameter, shared across the chain (typical range
-        1e-3 to 1e-4).
+    N : int
+        Chain length.
+    k : float or array-like
+        Propagation equilibrium constant(s) to evaluate at.
+    t : float
+        Cooperativity parameter.
 
     Returns
     -------
-    np.ndarray, length N
-        Probability that residue i is in the helical state, marginalized
-        over all other residues' states.
+    float or np.ndarray
+        Fraction helix at each k (scalar in, scalar out; array in,
+        array out).
     """
-    s = np.asarray(s, dtype=float)
-    n = s.size
-    if n == 0:
-        return np.array([])
+    rho_expr = _rho_symbolic(N)
+    fh_expr = _k_sym / (N * rho_expr) * sym.diff(rho_expr, _k_sym)
+    fh_func = sym.lambdify([_k_sym, _t_sym], fh_expr, "numpy")
 
-    # Transfer matrix W_i, rows = state of residue i-1, columns = state of
-    # residue i, state order [coil, helix]:
-    #   coil  -> coil  : 1
-    #   coil  -> helix : sigma * s_i   (nucleation)
-    #   helix -> coil  : 1
-    #   helix -> helix : s_i           (propagation)
-    matrices = np.empty((n, 2, 2))
-    for i in range(n):
-        matrices[i] = np.array(
-            [[1.0, sigma * s[i]], [1.0, s[i]]]
-        )
-
-    # alpha_i = weight vector over states AFTER processing residue i.
-    # alpha_0 is the virtual "before residue 1" state: coil, weight 1.
-    alpha = np.zeros((n + 1, 2))
-    alpha[0] = np.array([1.0, 0.0])
-    for i in range(n):
-        alpha[i + 1] = alpha[i] @ matrices[i]
-
-    # beta_i = weight of completing the chain from state at position i to
-    # the end. beta_n is the boundary: either final state allowed, weight 1.
-    beta = np.zeros((n + 1, 2))
-    beta[n] = np.array([1.0, 1.0])
-    for i in range(n - 1, -1, -1):
-        beta[i] = matrices[i] @ beta[i + 1]
-
-    Z = float(alpha[n] @ np.array([1.0, 1.0]))
-    if Z <= 0 or not np.isfinite(Z):
-        raise ValueError("Partition function is non-positive or non-finite; check s and sigma")
-
-    # P(residue i is helix) = alpha_i[helix] * beta_i[helix] / Z, using
-    # alpha/beta both indexed at position i (i.e. alpha[i+1], beta[i+1]
-    # in the 0-indexed arrays above, since alpha[0]/beta[0] are the
-    # boundary vectors before residue 1 / at the very end).
-    helix_state = 1
-    probs = (alpha[1 : n + 1, helix_state] * beta[1 : n + 1, helix_state]) / Z
-
-    return np.clip(probs, 0.0, 1.0)
-
-
-def mean_helix_content(s: Sequence[float], sigma: float = 5e-4) -> float:
-    """Fraction of residues helical, averaged over the whole chain."""
-    probs = helix_probabilities(s, sigma=sigma)
-    return float(np.mean(probs)) if probs.size else 0.0
+    k_arr = np.asarray(k, dtype=float)
+    result = fh_func(k_arr, t)
+    if k_arr.ndim == 0:
+        return float(result)
+    return np.asarray(result, dtype=float)
