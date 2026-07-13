@@ -1,8 +1,7 @@
 """
 chc_model.py
 
-Protein stability modeling in two stages, matching BPC PS6 (problems 6.3
-and 6.4):
+Protein stability modeling in two stages:
 
 Stage 1 - chemical (Gdn-HCl) denaturation curve fitting, per temperature.
     Six-parameter two-state fit of a CD (or other optical) signal vs
@@ -16,7 +15,7 @@ Stage 1 - chemical (Gdn-HCl) denaturation curve fitting, per temperature.
         y_obs(D) = y_N(D) * f_N(D) + y_D(D) * (1 - f_N(D))
 
     Fitting this at several temperatures gives a table of (T, dG_H2O(T),
-    m(T)) - exactly the output of PS6 problem 6.3, repeated per melt.
+    m(T)), repeated per melt.
 
 Stage 2 - CHC (constant heat capacity) stability curve fit.
     The dG_H2O(T) values from stage 1 are fit to the constant-Cp
@@ -26,11 +25,9 @@ Stage 2 - CHC (constant heat capacity) stability curve fit.
 
     where Th is the temperature of maximum enthalpy (dH = 0), Ts is the
     temperature of maximum entropy (dS = 0), and dCp is the (assumed
-    temperature-independent) heat capacity change on unfolding. This is
-    the "CHC model" referenced throughout PS6 problem 6.4.
+    temperature-independent) heat capacity change on unfolding. 
 
-Units: T in Kelvin, denaturant concentration in M, dG in kJ/mol (matches
-the coursework), R = 0.0083145 kJ/(mol*K).
+Units: T in Kelvin, denaturant concentration in M, dG in kJ/mol, R = 0.0083145 kJ/(mol*K).
 """
 
 from dataclasses import dataclass
@@ -39,7 +36,7 @@ from typing import Optional, Sequence
 import numpy as np
 from scipy.optimize import curve_fit
 
-R = 0.0083145  # kJ / (mol * K), matches PS6 convention
+R = 0.0083145  # kJ / (mol * K)
 
 
 # ---------------------------------------------------------------------
@@ -81,13 +78,9 @@ def two_state_denaturation_signal(
 ) -> np.ndarray:
     """
     Evaluate the two-state Gdn-HCl denaturation model at denaturant
-    concentrations D, following PS6 6.3's gdn_eqn convention:
+    concentrations D:
     dG(D) = dG_H2O + m*D, K = exp(-dG/RT), f_N = K/(1+K).
 
-    Note this sign convention (dG_H2O typically negative, m typically
-    positive) is the one used in the coursework; it differs from the
-    "dG = dG_H2O - m*D" convention sometimes seen elsewhere, so don't
-    mix the two.
     """
     D = np.asarray(D, dtype=float)
     dG = dG_H2O + m * D
@@ -210,7 +203,7 @@ class CHCStabilityFitResult:
 def chc_stability_curve(T: np.ndarray, Th: float, Ts: float, dCp: float) -> np.ndarray:
     """
     Constant heat capacity (CHC) model for the temperature dependence of
-    protein stability, matching PS6 problem 6.4:
+    protein stability:
 
         dG(T) = dCp * (T - Th) - T * dCp * ln(T / Ts)
 
@@ -243,7 +236,7 @@ def fit_chc_stability_curve(
     """
     Fit the CHC stability curve to a set of (T, dG_H2O) points, e.g. the
     per-temperature outputs of fit_denaturation_curve() collected across
-    several melts (PS6 problem 6.4 workflow).
+    several melts.
 
     Parameters
     ----------
