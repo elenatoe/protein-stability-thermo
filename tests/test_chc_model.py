@@ -35,7 +35,7 @@ def test_denaturation_signal_matches_denatured_at_high_D():
 
 def test_fit_recovers_known_parameters_noiseless():
     """Fitting noiseless synthetic data should recover dG_H2O and m to
-    high precision, matching the workflow in PS6 6.3."""
+    high precision."""
     true_dG, true_m, T = -20.8, 6.4, 298.15
     D, signal = generate_synthetic_melt(
         T=T, dG_H2O=true_dG, m=true_m, n_points=30, noise_sd=0.0, seed=1
@@ -82,10 +82,10 @@ def test_fit_rejects_mismatched_shapes():
 # Stage 2: CHC stability curve
 # ---------------------------------------------------------------------
 
-def test_chc_stability_curve_matches_ps6_reference_values():
-    """PS6 6.4 fit dG_H2O(T) data from real melts at 8 temperatures and
+def test_chc_stability_curve_matches_reference_values():
+    """fit dG_H2O(T) data from real melts at 8 temperatures and
     obtained Th=288.71 K, Ts=294.29 K, dCp=-3.81 kJ/mol/K. Reproduce
-    that fit here as a regression check against the real coursework
+    that fit here as a regression check against the real
     result."""
     T = np.array([293.15, 298.15, 303.15, 313.15, 318.15, 323.15, 328.15, 333.15])
     dG = np.array(
@@ -115,7 +115,7 @@ def test_chc_fit_recovers_known_parameters_noiseless():
 def test_chc_stability_curve_has_a_stability_maximum():
     """The CHC curve should have a single interior maximum (most stable
     temperature) between Th and Ts, not be monotonic - matches the
-    U-shaped stability curves plotted in PS6 6.2A."""
+    U-shaped stability curves."""
     T = np.linspace(250, 360, 500)
     dG = chc_stability_curve(T, Th=288.0, Ts=294.0, dCp=-3.5)
     min_idx = np.argmin(dG)
